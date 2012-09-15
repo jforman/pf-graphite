@@ -1,10 +1,11 @@
-#!/usr/local/bin/python
+#!/usr/bin/env python
 """Read an incoming pflog tcpdump stream, and act on its data."""
 
 # TODO: convert print statements to logging statements
 #         * handle error, info, debug log levels
-#       set up graphite/whisper/carbon to test sending.
+#       split out sending to carbon into another library
 #       will it block on non-existent carbon?
+#       parsing ip addresses in tcpdump: ipv4 and ipv6 (start with v4)
 
 # Apr 08 14:33:58.603146 rule 8/(match) block in on em0: \
     # 73.170.248.1 > 224.0.0.1: igmp query [tos 0xc0] [ttl 1]
@@ -17,7 +18,9 @@ import socket
 import subprocess
 import sys
 
-RE_TCPDUMP = re.compile(r"rule (?P<rule_number>\d+)/\(match\) (?P<action>\w+) (?P<direction>\w+) on (?P<interface>\w+):")
+RE_TCPDUMP_IPV4 = re.compile(r"""rule (?P<rule_number>\d+)/\(match\) (?P<action>\w+) (?P<direction>\w+) on (?P<interface>\w+): (?P<src_ip>([0-9]{1,3}\.){3}[0-9]{1,3})\.?(?P<src_port>\d{1,5})? > (?P<dest_ip>([0-9]{1,3}\.){3}[0-9]{1,3})\.?(?P<dest_port>\d{1,5})?""")
+
+# (?P<dest_ip>[0-255]\.{3}[0-255])\.(?P<dest_port>[0-65535]):
 RE_HOSTNAME = re.compile(r"(?P<short_name>\w+).?")
 
 HOSTNAME = RE_HOSTNAME.search(socket.gethostname()).group("short_name")
@@ -68,7 +71,7 @@ def get_args():
 def parse_tcpdump_line(raw_tcpdump_line):
     """Given tcpdump output line, parse into a Graphite-friendly statistic."""
     current_line = raw_tcpdump_line.strip()
-    parsed_line = RE_TCPDUMP.search(current_line)
+    parsed_line = RE_TCPDUMP_IPV4.search(current_line)
     if parsed_line is None:
         return None
 
@@ -76,6 +79,10 @@ def parse_tcpdump_line(raw_tcpdump_line):
                      "action" : parsed_line.group("action"),
                      "direction" : parsed_line.group("direction"),
                      "interface" : parsed_line.group("interface"),
+                     "src_ip" : parsed_line.group("src_ip"),
+                     "src_port" : parsed_line.group("src_port"),
+                     "dest_ip" : parsed_line.group("dest_ip"),
+                     "dest_port" : parsed_line.group("dest_port"),
                      }
     return tcpdump_dict
 
