@@ -1,14 +1,16 @@
 #!/usr/bin/env python
-"""Read an incoming pflog tcpdump stream, and act on its data."""
+"""Read an incoming pflog tcpdump stream, and act on its data.
 
-# TODO: convert print statements to logging statements
-#         * handle error, info, debug log levels
-#       split out sending to carbon into another library
-#       will it block on non-existent carbon?
-#       parsing ip addresses in tcpdump: ipv4 and ipv6 (start with v4)
+usage: process-pflog.py [-h] [--debug] [--pflog PFLOG] [--statsd STATSD]
 
-# Apr 08 14:33:58.603146 rule 8/(match) block in on em0: \
-    # 73.170.248.1 > 224.0.0.1: igmp query [tos 0xc0] [ttl 1]
+Process pflog for monitoring, alerting, etc.
+
+optional arguments:
+  -h, --help       show this help message and exit
+  --debug          Enable debug output.
+  --pflog PFLOG    Pflog interface
+  --statsd STATSD  Optional Statsd host:port to send statistics.
+"""
 
 import argparse
 import logging
@@ -18,42 +20,22 @@ import socket
 import subprocess
 import sys
 
-RE_TCPDUMP_IPV4 = re.compile(r"""rule (?P<rule_number>\d+)/\(match\) (?P<action>\w+) (?P<direction>\w+) on (?P<interface>\w+): (?P<src_ip>([0-9]{1,3}\.){3}[0-9]{1,3})\.?(?P<src_port>\d{1,5})? > (?P<dest_ip>([0-9]{1,3}\.){3}[0-9]{1,3})\.?(?P<dest_port>\d{1,5})?""")
+import statsd_client
 
-# (?P<dest_ip>[0-255]\.{3}[0-255])\.(?P<dest_port>[0-65535]):
+
 RE_HOSTNAME = re.compile(r"(?P<short_name>\w+).?")
+RE_TCPDUMP_IPV4 = re.compile(r"""(?P<datetime_stamp>.*?) rule (?P<rule_number>\d+)/\(match\) (?P<action>(block|pass)) (?P<direction>(in|out)) on (?P<interface>\w+): (?P<src_ip>([0-9]{1,3}\.){3}[0-9]{1,3})\.?(?P<src_port>\d{1,5})? > (?P<dest_ip>([0-9]{1,3}\.){3}[0-9]{1,3})\.?(?P<dest_port>\d{1,5})?""")
 
 HOSTNAME = RE_HOSTNAME.search(socket.gethostname()).group("short_name")
 
-# def send_to_carbon(stat_path, stat_value):
-#     """Given a stat path and value, send to carbon."""
-    # if parsed_line:
-    #     stat_path = "stat.%(hostname)s.pf.%(interface)s.rule%(rule_number)s.%(action)s.%(direction)s" % {
-    #         "hostname" : HOSTNAME,
-    #         "rule_number" : parsed_line.group("rule_number"),
-    #         "action" : parsed_line.group("action"),
-    #         "interface" : parsed_line.group("interface"),
-    #         "direction" : parsed_line.group("direction") }
-    #     logging.info("Pflog rule triggered.")
-    #     logging.debug("Stat path: %s", stat_path)
-#     to_carbon = "%(stat_path)s %(stat_value)s %(NOW)s" % {
-#         "stat_path" : stat_path,
-#         "stat_value" : stat_value,
-#         "NOW" : time.time() }
-#     print "sending to statsd incrementing: %s" % stat_path
-#     statsd_lib.Statsd.increment(stat_path)
-#     print "done sending"
-#     print "to carbon: %s" % to_carbon
-#     this_socket = socket.socket()
-#     try:
-#         this_socket.connect( (CARBON_HOST, CARBON_PORT) )
-#     except:
-#         print "unable to connect to carbon host/port"
-#         return 1
-#     formatted_message = to_carbon + "\n"
-#     print "formatted message: %s" % formatted_message
-#     this_socket.sendall(formatted_message)
-#     return 0
+
+def send_to_statsd(args, tcpdump_dict):
+    """Given a stat path, increment statistic in statsd."""
+    stat_path = "%(hostname)s.pf.%(interface)s.rule%(rule_number)s.%(direction)s.%(action)s" % tcpdump_dict
+    logging.info("Incrementing statsd path: %s", stat_path)
+    statsd_client.Statsd.increment(args, stat_path)
+    logging.debug("Done incrementing statsd.")
+
 
 def get_args():
     """Parse command line arguments."""
@@ -63,10 +45,13 @@ def get_args():
                         help="Enable debug output.")
     parser.add_argument("--pflog",
                         help="Pflog interface")
-    parser.add_argument("--carbon_hostport",
-                        help="Host:port for Carbon listening daemon.")
+    parser.add_argument("--statsd",
+                        action="store",
+                        help="Optional Statsd host:port to send statistics.")
     args = parser.parse_args()
+
     return args
+
 
 def parse_tcpdump_line(raw_tcpdump_line):
     """Given tcpdump output line, parse into a Graphite-friendly statistic."""
@@ -75,7 +60,8 @@ def parse_tcpdump_line(raw_tcpdump_line):
     if parsed_line is None:
         return None
 
-    tcpdump_dict = { "rule_number" : parsed_line.group("rule_number"),
+    tcpdump_dict = { "datetime_stamp" : parsed_line.group("datetime_stamp"),
+                     "rule_number" : parsed_line.group("rule_number"),
                      "action" : parsed_line.group("action"),
                      "direction" : parsed_line.group("direction"),
                      "interface" : parsed_line.group("interface"),
@@ -97,17 +83,18 @@ def main():
     else:
         log_level = logging.INFO
 
-    logging.basicConfig(level=log_level, format="%(asctime)s %(levelname)s %(message)s",
+    logging.basicConfig(level=log_level,
+                        format="%(asctime)s %(levelname)s %(message)s",
                         datefmt="%Y%m%dT%H:%M:%S")
 
     logging.debug("Command line args: %s", args)
 
     if os.getuid() != 0:
-        logging.error("Required to run as root. Exiting.")
+        logging.error("Required to run as root.")
         sys.exit(1)
 
     if not args.pflog:
-        logging.error("Missing required pflog interface argument.")
+        logging.error("Required pflog interface argument missing.")
         sys.exit(1)
 
     logging.info("Starting tcpdump.")
@@ -122,8 +109,11 @@ def main():
             logging.debug("Raw tcpdump output: %s", current_line.strip())
             tcpdump_dict = parse_tcpdump_line(current_line)
             logging.debug("Tcpdump dict: %s", tcpdump_dict)
-            if args.carbon_hostport:
-                send_to_carbon(tcpdump_dict)
+            if tcpdump_dict:
+                tcpdump_dict["hostname"] = HOSTNAME
+                logging.info("Matching pflog entry found.")
+                if args.statsd:
+                    send_to_statsd(args, tcpdump_dict)
     except KeyboardInterrupt:
         logging.info("Process killed by keyboard interrupt.")
         sys.exit(0)
