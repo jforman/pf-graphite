@@ -1,0 +1,77 @@
+#!/usr/bin/env python
+
+"""Parse pf stats 'pfctl -s info' and send to Graphite for visualization."""
+
+import argparse
+import pickle
+import re
+import socket
+import struct
+import subprocess
+import sys
+import time
+
+RE_PF_TOTAL_ENTRIES = re.compile(r"(?P<name>current entries)\s+(?P<total>\d+)")
+RE_PF_COUNTERS = re.compile(r"(?P<name>\S+(\s\w+)?)\s+(?P<total>\S+)\s+(?P<rate>\d+\.\d+)/s$")
+
+PF_INFO_METRIC = "pf.stats.%(hostname)s.%(name)s"
+
+def send_to_carbon(args, metric_list):
+    """Send plugin data to Carbon over Pickle format."""
+    carbon_host, carbon_port = args.carbon.split(":")
+    payload = pickle.dumps(metric_list)
+    header = struct.pack("!L", len(payload))
+    message = header + payload
+    carbon_sock = socket.create_connection((carbon_host, carbon_port), 10)
+    carbon_sock.sendall(message)
+    carbon_sock.close()
+
+def process_pfinfo(args):
+    """ Parse pfinfo output and send output to Carbon."""
+    now = int(time.time())
+    metric_list = []
+    hostname = socket.gethostname().split(".")[0]
+    pfinfo_output = subprocess.check_output(["/sbin/pfctl","-s","info"])
+
+
+    for current_line in pfinfo_output.split("\n"):
+        print "current line: %s" % current_line
+        line_re = RE_PF_TOTAL_ENTRIES.search(current_line)
+        if line_re:
+            print "found total entries line"
+            line_dict = line_re.groupdict()
+            line_dict["hostname"] = hostname
+            line_dict["name"] = line_dict["name"].replace(" ","_")
+            metric_list.append((PF_INFO_METRIC % line_dict, (now, line_dict["total"])))
+            continue
+
+        line_re = RE_PF_COUNTERS.search(current_line)
+        if line_re:
+            print "found a counter line"
+            line_dict = line_re.groupdict()
+            line_dict["hostname"] = hostname
+            metric_list.append((PF_INFO_METRIC % line_dict, (now, line_dict["total"])))
+
+    print "metric list: %s" % metric_list
+    send_to_carbon(args, metric_list)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="PF stat counters to Graphite (via carbon).")
+    parser.add_argument("--carbon",
+                        help="Carbon hostname:port to submit PF counter statistics to.")
+
+    args = parser.parse_args()
+    if not args.carbon:
+        parser.error("You forgot to pass a --carbon host:port argument pair.")
+
+    try:
+        while True:
+            process_pfinfo(args)
+            time.sleep(60)
+    except KeyboardInterrupt:
+        print "KeyboardInterrupt caught. Dying."
+        sys.exit(0)
+
+if __name__ == "__main__":
+    main()
