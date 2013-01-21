@@ -22,9 +22,12 @@ def send_to_carbon(args, metric_list):
     payload = pickle.dumps(metric_list)
     header = struct.pack("!L", len(payload))
     message = header + payload
-    carbon_sock = socket.create_connection((carbon_host, carbon_port), 10)
-    carbon_sock.sendall(message)
-    carbon_sock.close()
+    try:
+        carbon_sock = socket.create_connection((carbon_host, carbon_port), 10)
+        carbon_sock.sendall(message)
+        carbon_sock.close()
+    except socket.error, err:
+        print "Error sending stat to Carbon. Reason: %s" % err
 
 def process_pfinfo(args):
     """ Parse pfinfo output and send output to Carbon."""
@@ -35,10 +38,8 @@ def process_pfinfo(args):
 
 
     for current_line in pfinfo_output.split("\n"):
-        print "current line: %s" % current_line
         line_re = RE_PF_TOTAL_ENTRIES.search(current_line)
         if line_re:
-            print "found total entries line"
             line_dict = line_re.groupdict()
             line_dict["hostname"] = hostname
             line_dict["name"] = line_dict["name"].replace(" ","_")
@@ -47,12 +48,10 @@ def process_pfinfo(args):
 
         line_re = RE_PF_COUNTERS.search(current_line)
         if line_re:
-            print "found a counter line"
             line_dict = line_re.groupdict()
             line_dict["hostname"] = hostname
             metric_list.append((PF_INFO_METRIC % line_dict, (now, line_dict["total"])))
 
-    print "metric list: %s" % metric_list
     send_to_carbon(args, metric_list)
 
 
