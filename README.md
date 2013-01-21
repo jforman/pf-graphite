@@ -2,6 +2,8 @@
 
 Send pflog statistics to Graphite (via statsd) for monitoring visualization.
 
+Send pf counter info to Graphite to Graphite (via carbon) for monitoring visualization and dashboards.
+
 ## Requirements
 
 * Python (at least 2.7.x)
@@ -14,6 +16,8 @@ The pflog-graphite directory is expected to be deployed as /usr/local/pf-graphit
 The script itself is pflog_graphite_poller, running under the Python interpreter.
 
 Included is an rc.d script so script can be included in system startup, and controlled via /etc/rc.d/pflog_graphite_poller.
+
+Also included if pfcount_graphite_poller, which takes the output of `pfctl -s info` and sends that to Graphite via Carbon.
 
 ## Configuration
 
@@ -33,6 +37,10 @@ rc.d-pflog_graphite_poller must be copied to /etc/rc.d as 'pflog_graphite_poller
 Once all these files and configuration values are in place, start the poller:
 
     /etc/rc.d/pflog_graphite_poller start
+
+To configure the pfcount_graphite_poller script, copy the provided `rc.d-pfcount_graphite_poller` script to /etc/rc.d/ and add the following to the `pkg_scripts` variable in `/etc/rc.conf.local`:
+
+    pfcount_graphite_poller
 
 ## Example
 
