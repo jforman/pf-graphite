@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 
-"""Parse pf stats 'pfctl -s info' and send to Graphite for visualization."""
+"""Parse pf stats 'pfctl -s {info,label}' and send to Carbon for storage and visualization."""
 
 import argparse
+import logging
 import pickle
 import re
 import socket
@@ -13,63 +14,130 @@ import time
 
 RE_PF_TOTAL_ENTRIES = re.compile(r"(?P<name>current entries)\s+(?P<total>\d+)")
 RE_PF_COUNTERS = re.compile(r"(?P<name>\S+(\s\w+)?)\s+(?P<total>\S+)\s+(?P<rate>\d+\.\d+)/s$")
+RE_PF_LABELS = re.compile(r"(?P<name>\S+)\s+"
+                           "(?P<evaluations>\d+)\s+"
+                           "(?P<packets_total>\d+)\s+"
+                           "(?P<bytes_total>\d+)\s+"
+                           "(?P<packets_in>\d+)\s"
+                           "(?P<bytes_in>\d+)\s+"
+                           "(?P<packets_out>\d+)\s+"
+                           "(?P<bytes_out>\d+)\s+"
+                           "(?P<state_creations>\d+)$")
 
-PF_INFO_METRIC = "pf.stats.%(hostname)s.%(name)s"
+PF_COUNT_METRIC = "pf.%(hostname)s.counts.%(name)s"
+PF_LABEL_METRIC = "pf.%(hostname)s.label.%(label_name)s.%(action)s"
 
-def send_to_carbon(args, metric_list):
+HOSTNAME = socket.gethostname().replace(".", "_")
+
+def getNow():
+    return int(time.time())
+
+
+def sendToCarbon(args, metric_list):
     """Send plugin data to Carbon over Pickle format."""
-    carbon_host, carbon_port = args.carbon.split(":")
     payload = pickle.dumps(metric_list)
     header = struct.pack("!L", len(payload))
     message = header + payload
+    logging.debug("Metrics to send: %s", metric_list)
+
+    if not args.carbon:
+        logging.info("Not sending statistics to Carbon.")
+        return
+    carbon_host, carbon_port = args.carbon.split(":")
+    logging.info("Sending PF stats to %s.", args.carbon)
     try:
         carbon_sock = socket.create_connection((carbon_host, carbon_port), 10)
         carbon_sock.sendall(message)
         carbon_sock.close()
     except socket.error, err:
-        print "Error sending stat to Carbon. Reason: %s" % err
+        logging.error("Error sending stat to Carbon. Reason: %s", err)
 
-def process_pfinfo(args):
+
+def processPfCounters(args):
     """ Parse pfinfo output and send output to Carbon."""
-    now = int(time.time())
     metric_list = []
-    hostname = socket.gethostname().split(".")[0]
     pfinfo_output = subprocess.check_output(["/sbin/pfctl","-s","info"])
-
+    logging.debug("pfctl -s info output: %s", pfinfo_output)
 
     for current_line in pfinfo_output.split("\n"):
         line_re = RE_PF_TOTAL_ENTRIES.search(current_line)
         if line_re:
             line_dict = line_re.groupdict()
-            line_dict["hostname"] = hostname
+            line_dict["hostname"] = HOSTNAME
             line_dict["name"] = line_dict["name"].replace(" ","_")
-            metric_list.append((PF_INFO_METRIC % line_dict, (now, line_dict["total"])))
+            metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(), line_dict["total"])))
             continue
 
         line_re = RE_PF_COUNTERS.search(current_line)
         if line_re:
             line_dict = line_re.groupdict()
-            line_dict["hostname"] = hostname
-            metric_list.append((PF_INFO_METRIC % line_dict, (now, line_dict["total"])))
+            line_dict["hostname"] = HOSTNAME
+            metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(), line_dict["total"])))
 
-    send_to_carbon(args, metric_list)
+    sendToCarbon(args, metric_list)
+
+
+def processPfLabels(args):
+    metric_list = []
+    pflabel_output = subprocess.check_output(["/sbin/pfctl", "-s", "labels"])
+    logging.debug("pfctl -s labels output: %s", pflabel_output)
+    for current_label in pflabel_output.splitlines():
+        line_re = RE_PF_LABELS.search(current_label)
+        line_dict = line_re.groupdict()
+
+        label_name = line_dict["name"].replace(" ", "_")
+
+        for action, action_value in line_dict.iteritems():
+            logging.debug("action: %s, action_value: %s", action, action_value)
+            if action == "name":
+                # Name doesn't have a value associated with it
+                # other than the name of the label itself.
+                logging.debug("got to name, skipping")
+                continue
+            metric_name = PF_LABEL_METRIC % {"hostname": HOSTNAME,
+                                             "label_name": label_name,
+                                             "action": action }
+            logging.debug("metric name: %s", metric_name)
+            metric_list.append((metric_name, (getNow(), action_value)))
+
+    sendToCarbon(args, metric_list)
 
 
 def main():
     parser = argparse.ArgumentParser(description="PF stat counters to Graphite (via carbon).")
     parser.add_argument("--carbon",
                         help="Carbon hostname:port to submit PF counter statistics to.")
+    parser.add_argument("--debug", action="store_true",
+                        help="Print debugging statements to stdout.")
+    parser.add_argument("--interval", default=60, type=float,
+                        help="Interval which to gather (and potentially send) PF statistics.")
+    parser.add_argument("--send_counter_stats", action="store_true",
+                        help="Send counter statistics. Default: %(default)s.")
+    parser.add_argument("--send_label_stats", action="store_true",
+                        help="Send labels statistics. Default: %(default)s.")
 
     args = parser.parse_args()
+
+    FORMAT = "%(asctime)-15s %(levelname)s %(message)s"
+    if args.debug:
+        logging_level = logging.DEBUG
+    else:
+        logging_level = logging.INFO
+    logging.basicConfig(format=FORMAT, level=logging_level)
+
     if not args.carbon:
-        parser.error("You forgot to pass a --carbon host:port argument pair.")
+        logging.warning("You did not provide a carbon host:port, your statistics will not be sent anywhere.")
 
     try:
         while True:
-            process_pfinfo(args)
-            time.sleep(60)
+            if args.send_label_stats:
+                processPfLabels(args)
+            if args.send_counter_stats:
+                processPfCounters(args)
+            logging.info("Sleeping %s seconds.", args.interval)
+            time.sleep(args.interval)
     except KeyboardInterrupt:
-        print "KeyboardInterrupt caught. Dying."
+        logging.info("KeyboardInterrupt caught. Dying.")
         sys.exit(0)
 
 if __name__ == "__main__":
