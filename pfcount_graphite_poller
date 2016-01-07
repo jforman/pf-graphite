@@ -35,6 +35,34 @@ def getNow():
     return int(time.time())
 
 
+def graphite2librato(gmetric):
+      """ convert to counter, source, etc """
+      # logging.debug(gmetric)
+      metric, (time, value) = gmetric
+      metricarr = metric.split('.')
+      source = metricarr[1]
+      name = '.'.join([metricarr[0],metricarr[3]])
+      counter = True if metricarr[2] == 'counts' else False
+      logging.debug("metric name {} source {} value {}".format(name, source, value))
+      return name, value, source, counter
+
+
+def sendToLibrato(args, metric_list):
+    import librato
+    """Send data to Librato in batch format"""
+    # logging.debug("Metrics to send: %s", metric_list)
+    # api = librato.connect(user, token, sanitizer=librato.sanitize_metric_name)
+    # q = api.new_queue()
+    logging.info("Sending PF stats to Librato")
+    for metrictuple in metric_list:
+        metric, value, source, counter = graphite2librato(metrictuple)
+        if counter:
+            logging.debug("counter is true")
+    # q.add(dfdfdfd)
+    # q.submit()
+
+
+
 def sendToCarbon(args, metric_list):
     """Send plugin data to Carbon over Pickle format."""
     payload = pickle.dumps(metric_list)
@@ -77,8 +105,10 @@ def processPfCounters(args):
             line_dict["hostname"] = HOSTNAME
             metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(),
                                line_dict["total"])))
-
-    sendToCarbon(args, metric_list)
+    if args.librato:
+        sendToLibrato(args, metric_list)
+    else:
+        sendToCarbon(args, metric_list)
 
 
 def processPfLabels(args):
@@ -104,13 +134,18 @@ def processPfLabels(args):
             logging.debug("metric name: %s", metric_name)
             metric_list.append((metric_name, (getNow(), action_value)))
 
-    sendToCarbon(args, metric_list)
+    if args.librato:
+        sendToLibrato(args ,metric_list)
+    else:
+        sendToCarbon(args, metric_list)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PF stat counters to Graphite (via carbon).")
+    parser = argparse.ArgumentParser(description="PF stat counters to Graphite (via carbon) or Librato.")
     parser.add_argument("--carbon",
                         help="Carbon hostname:port to submit PF counter statistics to.")
+    parser.add_argument("--librato", action="store_true",
+                        help="Send PF counter statistics to Librato")
     parser.add_argument("--debug", action="store_true",
                         help="Print debugging statements to stdout.")
     parser.add_argument("--interval", default=60, type=float,
@@ -129,8 +164,8 @@ def main():
         logging_level = logging.INFO
     logging.basicConfig(format=FORMAT, level=logging_level)
 
-    if not args.carbon:
-        logging.warning("You did not provide a carbon host:port, your statistics will not be sent anywhere.")
+    if (not args.carbon) and (not args.librato):
+        logging.warning("You did not provide a graphing destination, your statistics will not be sent anywhere.")
 
     try:
         while True:
