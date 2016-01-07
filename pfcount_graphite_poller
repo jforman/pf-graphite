@@ -37,12 +37,11 @@ def getNow():
 
 def graphite2librato(gmetric):
       """ convert to counter, source, etc """
-      # logging.debug(gmetric)
       metric, (time, value) = gmetric
-      metricarr = metric.split('.')
-      source = metricarr[1]
-      name = '.'.join([metricarr[0],metricarr[3]])
-      counter = True if metricarr[2] == 'counts' else False
+      mlist = metric.split('.')
+      source = mlist[1]
+      name = '.'.join([mlist[0],mlist[3]])
+      counter = True if mlist[2] == 'counts' else False
       logging.debug("metric name {} source {} value {}".format(name, source, value))
       return name, value, source, counter
 
@@ -50,7 +49,7 @@ def graphite2librato(gmetric):
 def sendToLibrato(args, metric_list):
     import librato
     """Send data to Librato in batch format"""
-    # logging.debug("Metrics to send: %s", metric_list)
+    logging.debug("Metrics to send: %s", metric_list)
     # api = librato.connect(user, token, sanitizer=librato.sanitize_metric_name)
     # q = api.new_queue()
     logging.info("Sending PF stats to Librato")
