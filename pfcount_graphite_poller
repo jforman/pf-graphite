@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
-"""Parse pf stats 'pfctl -s {info,label}' and send to Carbon for storage and visualization."""
+"""Parse pf stats 'pfctl -s {info,label}' and send to Carbon for storage and
+visualization."""
 
 import argparse
 import logging
@@ -15,19 +16,20 @@ import time
 RE_PF_TOTAL_ENTRIES = re.compile(r"(?P<name>current entries)\s+(?P<total>\d+)")
 RE_PF_COUNTERS = re.compile(r"(?P<name>\S+(\s\w+)?)\s+(?P<total>\S+)\s+(?P<rate>\d+\.\d+)/s$")
 RE_PF_LABELS = re.compile(r"(?P<name>\S+)\s+"
-                           "(?P<evaluations>\d+)\s+"
-                           "(?P<packets_total>\d+)\s+"
-                           "(?P<bytes_total>\d+)\s+"
-                           "(?P<packets_in>\d+)\s"
-                           "(?P<bytes_in>\d+)\s+"
-                           "(?P<packets_out>\d+)\s+"
-                           "(?P<bytes_out>\d+)\s+"
-                           "(?P<state_creations>\d+)$")
+                          "(?P<evaluations>\d+)\s+"
+                          "(?P<packets_total>\d+)\s+"
+                          "(?P<bytes_total>\d+)\s+"
+                          "(?P<packets_in>\d+)\s"
+                          "(?P<bytes_in>\d+)\s+"
+                          "(?P<packets_out>\d+)\s+"
+                          "(?P<bytes_out>\d+)\s+"
+                          "(?P<state_creations>\d+)$")
 
 PF_COUNT_METRIC = "pf.%(hostname)s.counts.%(name)s"
 PF_LABEL_METRIC = "pf.%(hostname)s.label.%(label_name)s.%(action)s"
 
 HOSTNAME = socket.gethostname().replace(".", "_")
+
 
 def getNow():
     return int(time.time())
@@ -56,7 +58,7 @@ def sendToCarbon(args, metric_list):
 def processPfCounters(args):
     """ Parse pfinfo output and send output to Carbon."""
     metric_list = []
-    pfinfo_output = subprocess.check_output(["/sbin/pfctl","-s","info"])
+    pfinfo_output = subprocess.check_output(["/sbin/pfctl", "-s", "info"])
     logging.debug("pfctl -s info output: %s", pfinfo_output)
 
     for current_line in pfinfo_output.split("\n"):
@@ -64,15 +66,17 @@ def processPfCounters(args):
         if line_re:
             line_dict = line_re.groupdict()
             line_dict["hostname"] = HOSTNAME
-            line_dict["name"] = line_dict["name"].replace(" ","_")
-            metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(), line_dict["total"])))
+            line_dict["name"] = line_dict["name"].replace(" ", "_")
+            metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(),
+                               line_dict["total"])))
             continue
 
         line_re = RE_PF_COUNTERS.search(current_line)
         if line_re:
             line_dict = line_re.groupdict()
             line_dict["hostname"] = HOSTNAME
-            metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(), line_dict["total"])))
+            metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(),
+                               line_dict["total"])))
 
     sendToCarbon(args, metric_list)
 
@@ -96,7 +100,7 @@ def processPfLabels(args):
                 continue
             metric_name = PF_LABEL_METRIC % {"hostname": HOSTNAME,
                                              "label_name": label_name,
-                                             "action": action }
+                                             "action": action}
             logging.debug("metric name: %s", metric_name)
             metric_list.append((metric_name, (getNow(), action_value)))
 
