@@ -15,6 +15,8 @@ import time
 
 RE_PF_TOTAL_ENTRIES = re.compile(r"(?P<name>current entries)\s+(?P<total>\d+)")
 RE_PF_COUNTERS = re.compile(r"(?P<name>\S+(\s\w+)?)\s+(?P<total>\S+)\s+(?P<rate>\d+\.\d+)/s$")
+#RE_PF_INTERFACE = re.compile(r"(?P<name>\S+(\S+)?)\s+\[\sPackets:\s(?P<packets>\d+)\s+Bytes:\s(?P<bytes>\d+)$")
+RE_PF_INTERFACE = re.compile("(?P<name>[\w][/\w]*).*?(?P<packets>\d+).*?(?P<bytes>\d+)")
 RE_PF_LABELS = re.compile(r"(?P<name>\S+)\s+"
                           "(?P<evaluations>\d+)\s+"
                           "(?P<packets_total>\d+)\s+"
@@ -29,7 +31,6 @@ PF_COUNT_METRIC = "pf.%(hostname)s.counts.%(name)s"
 PF_LABEL_METRIC = "pf.%(hostname)s.label.%(label_name)s.%(action)s"
 
 HOSTNAME = socket.gethostname().replace(".", "_")
-
 
 def getNow():
     return int(time.time())
@@ -85,10 +86,13 @@ def sendToCarbon(args, metric_list):
 def processPfCounters(args):
     """ Parse pfinfo output and send output to Carbon."""
     metric_list = []
-    pfinfo_output = subprocess.check_output(["/sbin/pfctl", "-s", "info"])
+    #pfinfo_output = subprocess.check_output(["/sbin/pfctl", "-s", "info"])
+    pfinfo_output = open("example").read()
     logging.debug("pfctl -s info output: %s", pfinfo_output)
 
     for current_line in pfinfo_output.split("\n"):
+        # determine this from "Interface Stats for cnmac0            IPv4             IPv6"
+        loginterface = "cnmac0"
         line_re = RE_PF_TOTAL_ENTRIES.search(current_line)
         if line_re:
             line_dict = line_re.groupdict()
@@ -104,6 +108,27 @@ def processPfCounters(args):
             line_dict["hostname"] = HOSTNAME
             metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(),
                                line_dict["total"])))
+
+
+    # pfinterface_output = subprocess.check_output(["/sbin/pfctl", "-s", "Interface", "-vv", "-i", loginterface])
+    pfinterface_output = open("interface").read()
+    logging.debug("pfctl -s Interface output: %s", pfinterface_output)
+
+    for current_line in pfinterface_output.split("\n"):
+        logging.debug("processing {}".format(current_line))
+        line_re = RE_PF_INTERFACE.search(current_line)
+        if line_re:
+            line_dict = line_re.groupdict()
+            line_dict["hostname"] = HOSTNAME
+            # how to pass in both packets and bytes?
+            line_dict["name"] = line_dict["name"].replace("/", "_")
+            metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(),
+                               line_dict["packets"])))
+            metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(),
+                               line_dict["bytes"])))
+    
+    
+            
     if args.librato:
         sendToLibrato(args, metric_list)
     else:
