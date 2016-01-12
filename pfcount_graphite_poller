@@ -15,7 +15,6 @@ import time
 
 RE_PF_TOTAL_ENTRIES = re.compile(r"(?P<name>current entries)\s+(?P<total>\d+)")
 RE_PF_COUNTERS = re.compile(r"(?P<name>\S+(\s\w+)?)\s+(?P<total>\S+)\s+(?P<rate>\d+\.\d+)/s$")
-#RE_PF_INTERFACE = re.compile(r"(?P<name>\S+(\S+)?)\s+\[\sPackets:\s(?P<packets>\d+)\s+Bytes:\s(?P<bytes>\d+)$")
 RE_PF_INTERFACE = re.compile("(?P<name>[\w][/\w]*).*?(?P<packets>\d+).*?(?P<bytes>\d+)")
 RE_PF_LABELS = re.compile(r"(?P<name>\S+)\s+"
                           "(?P<evaluations>\d+)\s+"
@@ -26,6 +25,7 @@ RE_PF_LABELS = re.compile(r"(?P<name>\S+)\s+"
                           "(?P<packets_out>\d+)\s+"
                           "(?P<bytes_out>\d+)\s+"
                           "(?P<state_creations>\d+)$")
+RE_PF_LOGINTERFACE = re.compile("for (?P<interface>[\w]*[\d])")
 
 PF_COUNT_METRIC = "pf.%(hostname)s.counts.%(name)s"
 PF_LABEL_METRIC = "pf.%(hostname)s.label.%(label_name)s.%(action)s"
@@ -92,7 +92,9 @@ def processPfCounters(args):
 
     for current_line in pfinfo_output.split("\n"):
         # determine this from "Interface Stats for cnmac0            IPv4             IPv6"
-        loginterface = "cnmac0"
+        line_re = RE_PF_LOGINTERFACE.search(current_line)
+        if line_re:
+            loginterface = line_re.group('interface')
         line_re = RE_PF_TOTAL_ENTRIES.search(current_line)
         if line_re:
             line_dict = line_re.groupdict()
@@ -112,7 +114,7 @@ def processPfCounters(args):
 
     # pfinterface_output = subprocess.check_output(["/sbin/pfctl", "-s", "Interface", "-vv", "-i", loginterface])
     pfinterface_output = open("interface").read()
-    logging.debug("pfctl -s Interface output: %s", pfinterface_output)
+    logging.debug("pfctl -s Interface {} output: {}".format(loginterface,pfinterface_output))
 
     for current_line in pfinterface_output.split("\n"):
         logging.debug("processing {}".format(current_line))
@@ -120,10 +122,11 @@ def processPfCounters(args):
         if line_re:
             line_dict = line_re.groupdict()
             line_dict["hostname"] = HOSTNAME
-            # how to pass in both packets and bytes?
-            line_dict["name"] = line_dict["name"].replace("/", "_")
+            basename = line_dict["name"]
+            line_dict["name"] = basename.replace("/", "_packets_")
             metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(),
                                line_dict["packets"])))
+            line_dict["name"] = basename.replace("/", "_bytes_")
             metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(),
                                line_dict["bytes"])))
     
