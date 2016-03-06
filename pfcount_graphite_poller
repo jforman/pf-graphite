@@ -109,7 +109,7 @@ def main():
                         help="Carbon hostname:port to submit PF counter statistics to.")
     parser.add_argument("--debug", action="store_true",
                         help="Print debugging statements to stdout.")
-    parser.add_argument("--interval", default=60, type=float,
+    parser.add_argument("--interval", default=60, type=int,
                         help="Interval which to gather (and potentially send) PF statistics.")
     parser.add_argument("--send_counter_stats", action="store_true",
                         help="Send counter statistics. Default: %(default)s.")
