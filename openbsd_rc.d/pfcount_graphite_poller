@@ -1,6 +1,6 @@
 #!/bin/sh
 
-daemon="/usr/local/pf-graphite/pfcount_graphite_poller"
+daemon="/opt/pf-graphite/pfcount_graphite_poller"
 
 . /etc/rc.d/rc.subr
 
