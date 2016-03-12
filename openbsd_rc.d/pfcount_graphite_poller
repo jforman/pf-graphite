@@ -5,6 +5,8 @@ daemon="/opt/pf-graphite/pfcount_graphite_poller"
 . /etc/rc.d/rc.subr
 
 rc_bg=YES
-pexp=".*python.* ${daemon}"
+rc_reload=NO
+pexp="python ${daemon}.*"
+
 
 rc_cmd $1
