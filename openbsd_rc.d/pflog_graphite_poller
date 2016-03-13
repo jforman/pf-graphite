@@ -8,4 +8,11 @@ rc_bg=YES
 rc_reload=NO
 pexp="python ${daemon}.*"
 
+# This is an ugly hack because killing the underlying tcpdump
+# child processes proved to be another hack.
+rc_stop() {
+    /usr/bin/pkill tcpdump
+    /usr/bin/pkill pflog_graphite_poller
+}
+
 rc_cmd $1
