@@ -32,35 +32,40 @@ PF_LABEL_METRIC = "pf.%(hostname)s.label.%(label_name)s.%(action)s"
 
 HOSTNAME = socket.gethostname().replace(".", "_")
 
+
 def getNow():
     return int(time.time())
 
 
-def graphite2librato(gmetric):
-      """ convert to counter, source, etc """
-      metric, (time, value) = gmetric
-      mlist = metric.split('.')
-      source = mlist[1]
-      name = '.'.join([mlist[0],mlist[3]])
-      counter = True if mlist[2] == 'counts' else False
-      logging.debug("metric name {} source {} value {}".format(name, source, value))
-      return name, value, source, counter
-
-
 def sendToLibrato(args, metric_list):
+
+    def _graphite2librato(gmetric):
+        """ convert to counter, source, etc """
+        metric, (time, value) = gmetric
+        mlist = metric.split('.')
+        source = mlist[1]
+        name = '.'.join([mlist[0], mlist[3]])
+        logging.debug("metric name {} source {} value {}".format(name, source, value))
+        return name, value, source
+
     import librato
+    import ConfigParser
+
+    config = ConfigParser.ConfigParser()
+    config.read('/etc/librato.conf')
+    librato_user = config.get('librato', 'user')
+    librato_token = config.get('librato', 'token')
+
     """Send data to Librato in batch format"""
     logging.debug("Metrics to send: %s", metric_list)
-    # api = librato.connect(user, token, sanitizer=librato.sanitize_metric_name)
-    # q = api.new_queue()
+    # token = '2d4786312158a8b50b578ab910f7b7bf3c79043cd026e6ef8d0ca7f3d6135178'
+    api = librato.connect(librato_user, librato_token, sanitizer=librato.sanitize_metric_name)
+    q = api.new_queue()
     logging.info("Sending PF stats to Librato")
     for metrictuple in metric_list:
-        metric, value, source, counter = graphite2librato(metrictuple)
-        if counter:
-            logging.debug("counter is true")
-    # q.add(dfdfdfd)
-    # q.submit()
-
+        metric, value, source = _graphite2librato(metrictuple)
+        q.add("{}-md".format(metric), value, tags={'host': source})
+    q.submit()
 
 
 def sendToCarbon(args, metric_list):
@@ -86,8 +91,7 @@ def sendToCarbon(args, metric_list):
 def processPfCounters(args):
     """ Parse pfinfo output and send output to Carbon."""
     metric_list = []
-    #pfinfo_output = subprocess.check_output(["/sbin/pfctl", "-s", "info"])
-    pfinfo_output = open("example").read()
+    pfinfo_output = subprocess.check_output(["/sbin/pfctl", "-s", "info"])
     logging.debug("pfctl -s info output: %s", pfinfo_output)
 
     for current_line in pfinfo_output.split("\n"):
@@ -111,10 +115,8 @@ def processPfCounters(args):
             metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(),
                                line_dict["total"])))
 
-
-    # pfinterface_output = subprocess.check_output(["/sbin/pfctl", "-s", "Interface", "-vv", "-i", loginterface])
-    pfinterface_output = open("interface").read()
-    logging.debug("pfctl -s Interface {} output: {}".format(loginterface,pfinterface_output))
+    pfinterface_output = subprocess.check_output(["/sbin/pfctl", "-s", "Interface", "-vv", "-i", loginterface])
+    logging.debug("pfctl -s Interface {} output: {}".format(loginterface, pfinterface_output))
 
     for current_line in pfinterface_output.split("\n"):
         logging.debug("processing {}".format(current_line))
@@ -129,9 +131,7 @@ def processPfCounters(args):
             line_dict["name"] = basename.replace("/", "_bytes_")
             metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(),
                                line_dict["bytes"])))
-    
-    
-            
+
     if args.librato:
         sendToLibrato(args, metric_list)
     else:
@@ -162,7 +162,7 @@ def processPfLabels(args):
             metric_list.append((metric_name, (getNow(), action_value)))
 
     if args.librato:
-        sendToLibrato(args ,metric_list)
+        sendToLibrato(args, metric_list)
     else:
         sendToCarbon(args, metric_list)
 
