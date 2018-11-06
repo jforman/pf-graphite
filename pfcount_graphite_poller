@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""Parse pf stats 'pfctl -s {info,label}' and send to Carbon for storage and
+"""Parse pf stats 'pfctl -s {info,label} and interface' and send to Carbon for storage and
 visualization."""
 
 import argparse
@@ -37,37 +37,6 @@ def getNow():
     return int(time.time())
 
 
-def sendToLibrato(args, metric_list):
-
-    def _graphite2librato(gmetric):
-        """ convert to counter, source, etc """
-        metric, (time, value) = gmetric
-        mlist = metric.split('.')
-        source = mlist[1]
-        name = '.'.join([mlist[0], mlist[3]])
-        logging.debug("metric name {} source {} value {}".format(name, source, value))
-        return name, value, source
-
-    import librato
-    import ConfigParser
-
-    config = ConfigParser.ConfigParser()
-    config.read('/etc/librato.conf')
-    librato_user = config.get('librato', 'user')
-    librato_token = config.get('librato', 'token')
-
-    """Send data to Librato in batch format"""
-    logging.debug("Metrics to send: %s", metric_list)
-    # token = '2d4786312158a8b50b578ab910f7b7bf3c79043cd026e6ef8d0ca7f3d6135178'
-    api = librato.connect(librato_user, librato_token, sanitizer=librato.sanitize_metric_name)
-    q = api.new_queue()
-    logging.info("Sending PF stats to Librato")
-    for metrictuple in metric_list:
-        metric, value, source = _graphite2librato(metrictuple)
-        q.add("{}-md".format(metric), value, tags={'host': source})
-    q.submit()
-
-
 def sendToCarbon(args, metric_list):
     """Send plugin data to Carbon over Pickle format."""
     payload = pickle.dumps(metric_list)
@@ -95,7 +64,7 @@ def processPfCounters(args):
     logging.debug("pfctl -s info output: %s", pfinfo_output)
 
     for current_line in pfinfo_output.split("\n"):
-        # determine this from "Interface Stats for cnmac0            IPv4             IPv6"
+        # determine this from "Interface Stats for em0   IPv4             IPv6"
         line_re = RE_PF_LOGINTERFACE.search(current_line)
         if line_re:
             loginterface = line_re.group('interface')
@@ -132,9 +101,6 @@ def processPfCounters(args):
             metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(),
                                line_dict["bytes"])))
 
-    if args.librato:
-        sendToLibrato(args, metric_list)
-    else:
         sendToCarbon(args, metric_list)
 
 
@@ -161,18 +127,13 @@ def processPfLabels(args):
             logging.debug("metric name: %s", metric_name)
             metric_list.append((metric_name, (getNow(), action_value)))
 
-    if args.librato:
-        sendToLibrato(args, metric_list)
-    else:
         sendToCarbon(args, metric_list)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PF stat counters to Graphite (via carbon) or Librato.")
+    parser = argparse.ArgumentParser(description="PF stat counters to Graphite (via carbon).")
     parser.add_argument("--carbon",
                         help="Carbon hostname:port to submit PF counter statistics to.")
-    parser.add_argument("--librato", action="store_true",
-                        help="Send PF counter statistics to Librato")
     parser.add_argument("--debug", action="store_true",
                         help="Print debugging statements to stdout.")
     parser.add_argument("--interval", default=60, type=float,
@@ -191,7 +152,7 @@ def main():
         logging_level = logging.INFO
     logging.basicConfig(format=FORMAT, level=logging_level)
 
-    if (not args.carbon) and (not args.librato):
+    if (not args.carbon):
         logging.warning("You did not provide a graphing destination, your statistics will not be sent anywhere.")
 
     try:
@@ -205,6 +166,7 @@ def main():
     except KeyboardInterrupt:
         logging.info("KeyboardInterrupt caught. Dying.")
         sys.exit(0)
+
 
 if __name__ == "__main__":
     main()
