@@ -53,7 +53,7 @@ def sendToCarbon(args, metric_list):
         carbon_sock = socket.create_connection((carbon_host, carbon_port), 10)
         carbon_sock.sendall(message)
         carbon_sock.close()
-    except socket.error, err:
+    except socket.error as err:
         logging.error("Error sending stat to Carbon. Reason: %s", err)
 
 
@@ -161,6 +161,9 @@ def main():
                 processPfLabels(args)
             if args.send_counter_stats:
                 processPfCounters(args)
+            # for running from cron
+            if args.interval == 0:
+                sys.exit(0)
             logging.info("Sleeping %s seconds.", args.interval)
             time.sleep(args.interval)
     except KeyboardInterrupt:
