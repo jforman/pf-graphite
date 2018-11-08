@@ -48,7 +48,6 @@ def sendToCarbon(args, metric_list):
         logging.info("Not sending statistics to Carbon.")
         return
     carbon_host, carbon_port = args.carbon.split(":")
-    logging.info("Sending PF stats to %s.", args.carbon)
     try:
         carbon_sock = socket.create_connection((carbon_host, carbon_port), 10)
         carbon_sock.sendall(message)
@@ -133,10 +132,10 @@ def processPfLabels(args):
 def main():
     parser = argparse.ArgumentParser(description="PF stat counters to Graphite (via carbon).")
     parser.add_argument("--carbon",
-                        help="Carbon hostname:port to submit PF counter statistics to.")
+                        help="Carbon Pickle hostname:port to submit PF counter statistics to.")
     parser.add_argument("--debug", action="store_true",
                         help="Print debugging statements to stdout.")
-    parser.add_argument("--interval", default=60, type=float,
+    parser.add_argument("--interval", default=60, type=int,
                         help="Interval which to gather (and potentially send) PF statistics.")
     parser.add_argument("--send_counter_stats", action="store_true",
                         help="Send counter statistics. Default: %(default)s.")
@@ -155,6 +154,8 @@ def main():
     if (not args.carbon):
         logging.warning("You did not provide a graphing destination, your statistics will not be sent anywhere.")
 
+    logging.info("Carbon destination %s. Interval between statistics: %s seconds.", args.carbon, args.interval)
+   
     try:
         while True:
             if args.send_label_stats:
