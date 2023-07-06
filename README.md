@@ -6,7 +6,7 @@ Send pf counter info to Graphite to Graphite (via carbon) for monitoring visuali
 
 ## Requirements
 
-* Python (at least 2.7.x)
+* Python3 
 * Statsd (for inclusion of statistics into Graphite)
 
 ## Installation
@@ -16,6 +16,11 @@ The pflog-graphite directory is expected to be deployed as /usr/local/pf-graphit
 The script itself is pflog_graphite_poller, running under the Python interpreter.
 
 Included is an rc.d script so script can be included in system startup, and controlled via /etc/rc.d/pflog_graphite_poller.
+
+It's recommended to simply run from cron:
+```
+*       *       *       *       *       /usr/local/bin/python /usr/local/sbin/pfcount_graphite_poller --interval 0 --send_counter_stats --carbon 192.168.X.X:2004 >/dev/null 2>&1
+```
 
 Also included if pfcount_graphite_poller, which takes the output of `pfctl -s info` and sends that to Graphite via Carbon.
 

@@ -48,6 +48,7 @@ def sendToCarbon(args, metric_list):
         logging.info("Not sending statistics to Carbon.")
         return
     carbon_host, carbon_port = args.carbon.split(":")
+    logging.info("Sending PF stats to %s.", args.carbon)
     try:
         carbon_sock = socket.create_connection((carbon_host, carbon_port), 10)
         carbon_sock.sendall(message)
@@ -59,7 +60,7 @@ def sendToCarbon(args, metric_list):
 def processPfCounters(args):
     """ Parse pfinfo output and send output to Carbon."""
     metric_list = []
-    pfinfo_output = subprocess.check_output(["/sbin/pfctl", "-s", "info"])
+    pfinfo_output = subprocess.check_output(["/sbin/pfctl", "-s", "info"]).decode("utf-8")
     logging.debug("pfctl -s info output: %s", pfinfo_output)
 
     for current_line in pfinfo_output.split("\n"):
@@ -83,7 +84,7 @@ def processPfCounters(args):
             metric_list.append((PF_COUNT_METRIC % line_dict, (getNow(),
                                line_dict["total"])))
 
-    pfinterface_output = subprocess.check_output(["/sbin/pfctl", "-s", "Interface", "-vv", "-i", loginterface])
+    pfinterface_output = subprocess.check_output(["/sbin/pfctl", "-s", "Interface", "-vv", "-i", loginterface]).decode('utf-8')
     logging.debug("pfctl -s Interface {} output: {}".format(loginterface, pfinterface_output))
 
     for current_line in pfinterface_output.split("\n"):
@@ -105,7 +106,7 @@ def processPfCounters(args):
 
 def processPfLabels(args):
     metric_list = []
-    pflabel_output = subprocess.check_output(["/sbin/pfctl", "-s", "labels"])
+    pflabel_output = subprocess.check_output(["/sbin/pfctl", "-s", "labels"]).decode('utf-8')
     logging.debug("pfctl -s labels output: %s", pflabel_output)
     for current_label in pflabel_output.splitlines():
         line_re = RE_PF_LABELS.search(current_label)
@@ -132,10 +133,10 @@ def processPfLabels(args):
 def main():
     parser = argparse.ArgumentParser(description="PF stat counters to Graphite (via carbon).")
     parser.add_argument("--carbon",
-                        help="Carbon Pickle hostname:port to submit PF counter statistics to.")
+                        help="Carbon hostname:port to submit PF counter statistics to.")
     parser.add_argument("--debug", action="store_true",
                         help="Print debugging statements to stdout.")
-    parser.add_argument("--interval", default=60, type=int,
+    parser.add_argument("--interval", default=60, type=float,
                         help="Interval which to gather (and potentially send) PF statistics.")
     parser.add_argument("--send_counter_stats", action="store_true",
                         help="Send counter statistics. Default: %(default)s.")
@@ -154,8 +155,6 @@ def main():
     if (not args.carbon):
         logging.warning("You did not provide a graphing destination, your statistics will not be sent anywhere.")
 
-    logging.info("Carbon destination %s. Interval between statistics: %s seconds.", args.carbon, args.interval)
-   
     try:
         while True:
             if args.send_label_stats:
